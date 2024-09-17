@@ -1,0 +1,66 @@
+import streamlit as st
+import pandas as pd
+import pulp
+
+# Title of the app
+st.title("NFL DFS Lineup Optimizer")
+
+# Instructions for the user
+st.markdown("""
+This tool helps you optimize your NFL DFS lineups based on player projections and salary constraints.
+Upload a CSV file containing player data with columns: 'name', 'projection', 'salary', 'position'.
+""")
+
+# Upload CSV file with player data
+uploaded_file = st.file_uploader("Choose a CSV file with player data")
+if uploaded_file is not None:
+    # Load the CSV file into a pandas DataFrame
+    df = pd.read_csv(uploaded_file)
+
+    st.write("Player Data:", df.head())
+
+    # Salary cap and position constraints
+    salary_cap = st.number_input("Enter Salary Cap", value=50000)
+    
+    position_constraints = {
+        "QB": st.number_input("Number of QBs", value=1),
+        "RB": st.number_input("Number of RBs", value=2),
+        "WR": st.number_input("Number of WRs", value=3),
+        "TE": st.number_input("Number of TEs", value=1),
+        "FLEX": st.number_input("Number of FLEX (RB/WR/TE)", value=1),
+        "DST": st.number_input("Number of DSTs", value=1)
+    }
+
+    # Set up the optimization problem
+    problem = pulp.LpProblem("NFL_Lineup_Optimizer", pulp.LpMaximize)
+
+    # Define decision variables for each player (binary 0 or 1)
+    player_vars = {row['name']: pulp.LpVariable(row['name'], cat='Binary') for idx, row in df.iterrows()}
+
+    # Objective function: maximize total projected points
+    problem += pulp.lpSum([row['projection'] * player_vars[row['name']] for idx, row in df.iterrows()])
+
+    # Salary constraint: ensure total salary is within the cap
+    problem += pulp.lpSum([row['salary'] * player_vars[row['name']] for idx, row in df.iterrows()]) <= salary_cap
+
+    # Positional constraints
+    for position, count in position_constraints.items():
+        if position != "FLEX":
+            problem += pulp.lpSum([player_vars[row['name']] for idx, row in df.iterrows() if row['position'] == position]) == count
+
+    # Flex constraint (RB, WR, TE)
+    problem += pulp.lpSum([player_vars[row['name']] for idx, row in df.iterrows() if row['position'] in ['RB', 'WR', 'TE']]) == position_constraints["FLEX"]
+
+    # Solve the optimization problem
+    if st.button("Optimize Lineup"):
+        problem.solve()
+
+        # Extract the optimal lineup
+        optimal_lineup = [row['name'] for idx, row in df.iterrows() if player_vars[row['name']].value() == 1]
+        total_salary = sum([row['salary'] for idx, row in df.iterrows() if player_vars[row['name']].value() == 1])
+        total_projection = sum([row['projection'] for idx, row in df.iterrows() if player_vars[row['name']].value() == 1])
+
+        st.write("Optimal Lineup:")
+        st.write(optimal_lineup)
+        st.write(f"Total Salary: {total_salary}")
+        st.write(f"Projected Points: {total_projection}")
